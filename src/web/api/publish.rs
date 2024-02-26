@@ -3,9 +3,17 @@
 // Crate Uses
 
 // External Uses
-use axum::{http::StatusCode, Json};
+use axum::{http::StatusCode, Json, Router, routing::post};
 use serde::Deserialize;
 
+
+pub fn register_routes(router: Router) -> Router {
+    let router = router
+        .route("/api/publish/package", post(publish_package))
+    ;
+
+    router
+}
 
 #[allow(unused)]
 pub async fn publish_package(Json(payload): Json<PackageDetails>) -> (StatusCode, Json<String>) {

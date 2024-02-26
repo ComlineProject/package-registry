@@ -3,12 +3,20 @@
 // Crate Uses
 
 // External Uses
-use axum::{http::StatusCode, Json};
+use axum::{http::StatusCode, routing::post, Json, Router};
 use serde::{Deserialize, Serialize};
 
 
 
-pub async fn oidc_callback(Json(payload): Json<CreateUser>) -> (StatusCode, Json<User>) {
+pub fn register_routes(router: Router) -> Router {
+    let router = router
+        .route("/api/users/register", post(create_user))
+    ;
+
+    router
+}
+
+pub async fn create_user(Json(payload): Json<CreateUser>) -> (StatusCode, Json<User>) {
     let user = User {
         id: 1337,
         username: payload.username,
@@ -18,7 +26,7 @@ pub async fn oidc_callback(Json(payload): Json<CreateUser>) -> (StatusCode, Json
 }
 
 #[derive(Deserialize)]
-pub struct  {
+pub struct CreateUser {
     username: String,
 }
 

@@ -13,7 +13,7 @@ mod web;
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt().init();
-    storage::init();
+    //storage::init();
 
-    web::rest::init().await;
+    web::init().await;
 }

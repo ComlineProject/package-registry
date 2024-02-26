@@ -16,10 +16,10 @@ pub struct GithubOIDC {
 
 impl GithubOIDC {
     pub fn new(id: String, secret: String, redirect_url: String) -> Result<Box<dyn OIDCHandler>> {
-        Box::new(Self {
+        Ok(Box::new(Self {
             id, secret,
             redirect_url,
-        })
+        }))
     }
 }
 

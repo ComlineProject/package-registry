@@ -23,13 +23,10 @@ pub struct GitlabOIDC {
 
 impl GitlabOIDC {
     pub fn new(id: String, secret: String, redirect_url: String) -> Result<Box<dyn OIDCHandler>> {
-        Ok(
-            Box::new(Self {
-                id: ClientId::new(id), secret: ClientSecret::new(secret),
-                redirect_url: RedirectUrl::new(redirect_url)?,
-                }
-            )
-        )
+        Ok(Box::new(Self {
+            id: ClientId::new(id), secret: ClientSecret::new(secret),
+            redirect_url: RedirectUrl::new(redirect_url)?,
+        }))
     }
 }
 
@@ -50,10 +47,10 @@ impl OIDCHandler for GitlabOIDC {
         // Set up the config for the GitLab OAuth2 process.
         let client = CoreClient::from_provider_metadata(
             provider_metadata,
-            self.id,
-            Some(self.secret),
+            self.id.clone(),
+            Some(self.secret.clone()),
         )
-        .set_redirect_uri(self.redirect_url);
+        .set_redirect_uri(self.redirect_url.clone());
 
         // Generate the authorization URL to which we'll redirect the user.
         let (authorize_url, csrf_state, nonce) = client
@@ -69,11 +66,13 @@ impl OIDCHandler for GitlabOIDC {
 
         println!("Open this URL in your browser:\n{}\n", authorize_url);
         
-        Ok(authorize_url.to_string())
+        // authorize_url.to_string()
+        Ok(())
     }
 
 
     fn auth_callback(&mut self) -> Result<()> {
+        /*
         println!("GitLab returned the following code:\n{}\n", code.secret());
         println!(
             "GitLab returned the following state:\n{} (expected `{}`)\n",
@@ -123,6 +122,8 @@ impl OIDCHandler for GitlabOIDC {
         println!("GitLab returned UserInfo: {:?}", userinfo_claims);
         
         Ok(userinfo_claims)
+        */
+        Ok(())
     }
 }
 

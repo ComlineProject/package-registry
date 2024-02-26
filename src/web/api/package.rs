@@ -2,11 +2,25 @@
 
 // Crate Uses
 use crate::storage::FROZEN_PROJECT_RELATIVE_DIR;
+use crate::web;
 
 // External Uses
-use axum::{extract, http::StatusCode, Router};
+use axum::{extract::Path, http::StatusCode, Router};
 use axum::routing::get;
 use serde::Deserialize;
+
+
+#[derive(Deserialize)]
+pub struct PackageMeta {
+    name: String,
+    version: String
+}
+
+
+pub fn register_routes(router: Router) -> Router {
+    router
+        .route("/api/package/:name/:version", get(find_package_url))
+}
 
 
 /*
@@ -17,26 +31,14 @@ pub async fn find_package_url(Json(payload): Json<PackageMeta>) -> (StatusCode, 
 }
 */
 
-#[allow(unused)]
 pub async fn find_package_url(
-    extract::Path((name, version)): extract::Path<(String, String)>
+    Path((name, version)): Path<(String, String)>
 ) -> (StatusCode, String) {
     let url = format!(
         "{}/{}/{}{}",
-        super::web_address(), FROZEN_PROJECT_RELATIVE_DIR, name, version
+        web::web_address(), FROZEN_PROJECT_RELATIVE_DIR, name, version
     );
 
     (StatusCode::OK, url)
 }
 
-
-#[allow(unused)]
-#[derive(Deserialize)]
-pub struct PackageMeta {
-    name: String, version: String
-}
-
-pub fn register_routes(router: Router) -> Router {
-    router
-        .route("/api/package/:name/:version", get(find_package_url))
-}

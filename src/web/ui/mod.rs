@@ -1,8 +1,10 @@
 // Relative Modules
-mod package;
+mod oidc;
 mod template;
 
 // Standard Uses
+use std::fmt;
+use std::str::FromStr;
 
 // Crate Uses
 
@@ -10,19 +12,26 @@ mod template;
 use axum::Router;
 use axum::routing::get;
 use axum::response::Html;
+use serde::{de, Deserialize, Deserializer};
 
 
 pub fn register_routes(router: Router) -> Router {
-    router
-        .route("/", get(root))
-        .route("/packages", get(packages))
-        .route("/package/:name", get(package::package_show))
+    let router = router
+        .route("/", get(|| async { Html(include_str!("../../../templates/index.html")) }))
+    ;        
+    
+    oidc::register_routes(router)
 }
 
-async fn root() -> Html<&'static str> {
-    Html(include_str!("../../../templates/index.html"))
-}
-
-async fn packages() -> Html<&'static str> {
-    Html(include_str!("../../../templates/packages.html"))
+pub fn empty_string_as_none<'de, D, T>(de: D) -> Result<Option<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: FromStr,
+    T::Err: fmt::Display,
+{
+    let opt = Option::<String>::deserialize(de)?;
+    match opt.as_deref() {
+        None | Some("") => Ok(None),
+        Some(s) => FromStr::from_str(s).map_err(de::Error::custom).map(Some),
+    }
 }

@@ -1,0 +1,8 @@
+# Cargo build
+/target
+
+# JetBrains IDEA settings
+.idea
+
+# Deployment Environment settings
+.env

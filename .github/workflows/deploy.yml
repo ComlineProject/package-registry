@@ -11,7 +11,7 @@ permissions:
 jobs:
   build-and-upload:
     name: Build and upload
-    runs-on: $\{\{ matrix.os \}\}
+    runs-on: ${{ matrix.os }}
 
     strategy:
       matrix:
@@ -27,11 +27,11 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Get the release version from the tag
         shell: bash
-        run: echo "VERSION=$\{GITHUB_REF#refs/tags/\}" >> $GITHUB_ENV
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
 
       - name: Install Rust
         # Or @nightly if you want
@@ -39,30 +39,30 @@ jobs:
         # Arguments to pass in
         with:
           # Make Rust compile to our target (defined in the matrix)
-          targets: $\{\{ matrix.target \}\}
+          targets: ${{ matrix.target }}
+
+      - name: Install musl tools
+        if: matrix.build == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
 
       - name: Build
-        uses: actions-rs/cargo@v1
-        with:
-          use-cross: true
-          command: build
-          args: --verbose --release --target $\{\{ matrix.target \}\}
+        run: cargo build --verbose --release --target ${{ matrix.target }}
 
       - name: Build archive
         shell: bash
         run: |
           # Replace with the name of your binary
-          binary_name="comline-package-server"
+          binary_name="comline-package-registry-server"
 
-          dirname="$binary_name-$\{\{ env.VERSION \}\}-$\{\{ matrix.target \}\}"
+          dirname="$binary_name-${{ env.VERSION }}-${{ matrix.target }}"
           mkdir "$dirname"
-          if [ "$\{\{ matrix.os \}\}" = "windows-latest" ]; then
-            mv "target/$\{\{ matrix.target \}\}/release/$binary_name.exe" "$dirname"
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            mv "target/${{ matrix.target }}/release/$binary_name.exe" "$dirname"
           else
-            mv "target/$\{\{ matrix.target \}\}/release/$binary_name" "$dirname"
+            mv "target/${{ matrix.target }}/release/$binary_name" "$dirname"
           fi
 
-          if [ "$\{\{ matrix.os \}\}" = "windows-latest" ]; then
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
             7z a "$dirname.zip" "$dirname"
             echo "ASSET=$dirname.zip" >> $GITHUB_ENV
           else
@@ -74,4 +74,4 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            $\{\{ env.ASSET \}\}
+            ${{ env.ASSET }}

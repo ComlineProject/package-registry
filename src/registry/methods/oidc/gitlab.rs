@@ -9,7 +9,6 @@ use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use openidconnect::*;
 use openidconnect::core::*;
-use openidconnect::reqwest::http_client;
 
 
 
@@ -35,9 +34,14 @@ impl OIDCHandler for GitlabOIDC {
     fn authenticate_and_authorizate(&mut self) -> Result<()> {
         let issuer_url = IssuerUrl::new("https://gitlab.com".to_string())?;
 
+        // The HTTP client must not follow redirects (SSRF protection).
+        let http_client = openidconnect::reqwest::blocking::ClientBuilder::new()
+            .redirect(openidconnect::reqwest::redirect::Policy::none())
+            .build()?;
+
         // Fetch GitLab's OpenID Connect discovery document.
         let provider_metadata = CoreProviderMetadata::discover(
-            &issuer_url, http_client
+            &issuer_url, &http_client
         )
             .unwrap_or_else(|err| {
                 handle_error(&err, "Failed to discover OpenID Provider");
@@ -83,7 +87,7 @@ impl OIDCHandler for GitlabOIDC {
         // Exchange the code with a token.
         let token_response = client
             .exchange_code(code)
-            .request(http_client)
+            .request(&http_client)
             .unwrap_or_else(|err| {
                 handle_error(&err, "Failed to contact token endpoint");
                 unreachable!();
@@ -113,7 +117,7 @@ impl OIDCHandler for GitlabOIDC {
                 handle_error(&err, "No user info endpoint");
                 unreachable!();
             })
-            .request(http_client)
+            .request(&http_client)
             .unwrap_or_else(|err| {
                 handle_error(&err, "Failed requesting user info");
                 unreachable!();

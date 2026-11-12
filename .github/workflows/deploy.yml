@@ -1,77 +1,145 @@
 name: Deploy
 
+# A pushed tag `X.Y.Z` builds the server for Linux (static musl) and macOS and
+# attaches both archives to a GitHub release (created if it doesn't exist).
+#
+# A pull request that touches the build runs the same two builds and the same
+# archiving, and stops there: only a tag push reaches the `release` job, the
+# one job with a write token.
+
 on:
   push:
     tags:
       - "[0-9]+.[0-9]+.[0-9]+"
+  pull_request:
+    paths:
+      - ".github/workflows/deploy.yml"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
 
 permissions:
-  contents: write
+  contents: read
+
+# Each tag has its own group, and a deploy is never cancelled once it has
+# started. Only a superseded pull request run is.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Container jobs default to `sh`; the steps are bash.
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
-  build-and-upload:
-    name: Build and upload
+  build:
+    name: Build ${{ matrix.build }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    # Linux builds in the tools image (Rust 1.99.1, the musl target and
+    # musl-gcc); macOS has no container.
+    container: ${{ matrix.container }}
 
     strategy:
       matrix:
-        # You can add more, for any target you'd like!
         include:
           - build: linux
-            os: ubuntu-latest
+            os: ubuntu-24.04
+            container: ghcr.io/comlineproject/ci-tools@sha256:b9301f9caf3e47f0b839de85efda178f698a55daf7fc387b463adeec93ecd433
             target: x86_64-unknown-linux-musl
 
+          # Built on the arm64 runner, which cross-compiles to x86_64.
           - build: macos
-            os: macos-latest
+            os: macos-15
+            container: ""
             target: x86_64-apple-darwin
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Get the release version from the tag
-        shell: bash
-        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
-
-      - name: Install Rust
-        # Or @nightly if you want
-        uses: dtolnay/rust-toolchain@stable
-        # Arguments to pass in
+      - name: Harden the runner
+        if: matrix.container == ''
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
-          # Make Rust compile to our target (defined in the matrix)
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Keep in step with rust-toolchain.toml (the Linux image has the same).
+      - name: Install Rust
+        if: matrix.container == ''
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: 1.99.1
           targets: ${{ matrix.target }}
 
-      - name: Install musl tools
-        if: matrix.build == 'linux'
-        run: sudo apt-get update && sudo apt-get install -y musl-tools
-
       - name: Build
-        run: cargo build --verbose --release --target ${{ matrix.target }}
+        env:
+          TARGET: ${{ matrix.target }}
+        run: cargo build --verbose --locked --release --target "$TARGET"
 
       - name: Build archive
-        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
-          # Replace with the name of your binary
           binary_name="comline-package-registry-server"
 
-          dirname="$binary_name-${{ env.VERSION }}-${{ matrix.target }}"
+          # The tag on a release; a pull request's archive is only a build check.
+          version=dev
+          if [ "$REF_TYPE" = tag ]; then version=$REF_NAME; fi
+
+          dirname="$binary_name-$version-$TARGET"
           mkdir "$dirname"
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            mv "target/${{ matrix.target }}/release/$binary_name.exe" "$dirname"
-          else
-            mv "target/${{ matrix.target }}/release/$binary_name" "$dirname"
-          fi
+          mv "target/$TARGET/release/$binary_name" "$dirname"
+          tar -czf "$dirname.tar.gz" "$dirname"
+          echo "ASSET=$dirname.tar.gz" >> "$GITHUB_ENV"
 
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            7z a "$dirname.zip" "$dirname"
-            echo "ASSET=$dirname.zip" >> $GITHUB_ENV
-          else
-            tar -czf "$dirname.tar.gz" "$dirname"
-            echo "ASSET=$dirname.tar.gz" >> $GITHUB_ENV
-          fi
-
-      - name: Release
-        uses: softprops/action-gh-release@v1
+      - name: Upload the archive
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          files: |
-            ${{ env.ASSET }}
+          name: archive-${{ matrix.build }}
+          path: ${{ env.ASSET }}
+          if-no-files-found: error
+
+  release:
+    name: Release
+    needs: build
+    # Never on a pull request: the real deploy is the first tag pushed after
+    # this workflow is on main.
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # The only job that writes.
+    permissions:
+      contents: write
+    steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+
+      - name: Download the archives
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: archive-*
+          merge-multiple: true
+          path: dist
+
+      # No checkout: `gh` needs only the token and the repository.
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "$TAG" --notes ""
+          fi
+          # A re-run replaces what landed the first time.
+          gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber

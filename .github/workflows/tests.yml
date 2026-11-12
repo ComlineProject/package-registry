@@ -9,17 +9,25 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same pull request supersedes this run; a branch's runs
+# queue instead.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-
-    runs-on: ubuntu-latest
-
-    steps:
-    - uses: actions/checkout@v4
-    - name: Build
-      run: cargo build --verbose
-    - name: Run tests
-      run: cargo test --verbose
+  # The toolchain matrix (stable, beta, nightly), the same build and tests on
+  # the other platforms, and a stable canary on ubuntu-26.04 that may fail
+  # without failing the run: the org's reusable workflow. Cargo.lock is
+  # committed, so the build and the tests must not need to change it.
+  rust:
+    name: rust
+    permissions:
+      contents: read
+    uses: ComlineProject/.github/.github/workflows/rust-ci.yml@797d473553d7f2fc50895bb2573acb83ac63c7cb # main, no release tag yet
+    with:
+      build-args: --locked
+      test-args: --locked

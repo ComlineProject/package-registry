@@ -1,29 +1,86 @@
 name: Release Build
 
+# A release created by hand gets the server built for Windows (GNU) and Linux
+# (static musl), zipped with the README and a checksum, and attached to it.
+# (deploy.yml does the same for a pushed tag, for Linux and macOS.)
+#
+# A pull request that touches the build runs the same builds and uploads
+# nothing: the `build` jobs have a read-only token and never see the release,
+# and only the `release` job, which runs for a release event alone, can write.
+# What the build makes is handed over as an artifact.
+
 on:
   release:
     types: [created]
+  pull_request:
+    paths:
+      - ".github/workflows/release.yml"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
 
 permissions:
   contents: read
 
+# A release that has started is never cancelled; only a superseded pull
+# request run is.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  release:
-    name: release ${{ matrix.target }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
+  build:
+    name: build ${{ matrix.target }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         target: [x86_64-pc-windows-gnu, x86_64-unknown-linux-musl]
     steps:
-      - uses: actions/checkout@v4
-      - name: Compile and release
-        uses: rust-build/rust-build.action@v1.4.5
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # A Docker action, which builds in its own image: it needs no token to
+      # build, so it gets none, and `UPLOAD_MODE: none` stops it uploading.
+      - name: Compile
+        uses: rust-build/rust-build.action@6febf1b0ed6499a46610b58ef9d810398e75f3c2 # v1.4.5
         with:
           RUSTTARGET: ${{ matrix.target }}
           EXTRA_FILES: "README.md"
-          
+          UPLOAD_MODE: none
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-${{ matrix.target }}
+          path: |
+            output/*.zip
+            output/*.sha256sum
+          if-no-files-found: error
+
+  release:
+    name: release
+    needs: build
+    if: github.event_name == 'release'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # The only job that writes.
+    permissions:
+      contents: write
+    steps:
+      - uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: dist
+      # No checkout: `gh` needs only the token and the repository.
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber
